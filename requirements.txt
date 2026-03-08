@@ -1,0 +1,5 @@
+# Core (no browser)
+# No required deps for describe/it/expect and API request (stdlib only).
+
+# Browser automation (optional)
+playwright>=1.40.0
