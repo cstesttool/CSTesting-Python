@@ -13,6 +13,10 @@ pip install -e ".[browser]"
 playwright install chromium
 ```
 
+## CLI reference
+
+Full command-line options (tags, debug, browser, config): **[docs/CLI.md](docs/CLI.md)**.
+
 ## Quick start
 
 **1. Create a test file** (e.g. `math_test.py`):
@@ -187,7 +191,7 @@ print(result)  # passed, failed, skipped, total, duration, errors
    python -m build
    ```
    On Windows, if `python` isn’t recognized, use **`py -m build`** instead.
-   This creates `dist/cstesting-0.1.0.tar.gz` and a wheel.
+   This creates `dist/cstesting-0.1.1.tar.gz` and a wheel.
 
 4. **Upload to PyPI:**
    ```bash

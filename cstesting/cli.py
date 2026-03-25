@@ -8,9 +8,10 @@ import sys
 import glob
 import importlib.util
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from .runner import run, reset_runner
+from .tags import normalize_test_tag
 from .assertions import AssertionError
 from .report import write_report
 from .config_runner import run_config_file
@@ -18,6 +19,107 @@ from .types import RunResult
 
 
 TEST_EXTENSIONS = (".test.py", ".spec.py")
+
+FLAG_TAG = "--tag"
+FLAG_TAGS = "--tags"
+FLAG_T = "-t"
+
+
+def _looks_like_pattern(arg: str) -> bool:
+    return (
+        "/" in arg
+        or "\\" in arg
+        or arg.endswith((".test.py", ".spec.py"))
+        or arg.endswith((".conf", ".config"))
+        or "*" in arg
+    )
+
+
+def _parse_tag_args(argv: List[str]) -> Tuple[List[str], List[str], Optional[str]]:
+    """--tag / -t (include) and --skip-tag / --exclude-tag (exclude); comma-separated OK."""
+    tags: List[str] = []
+    exclude_tags: List[str] = []
+    pattern: Optional[str] = None
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in (FLAG_TAG, FLAG_TAGS, FLAG_T):
+            if i + 1 < len(argv):
+                i += 1
+                tags.extend(normalize_test_tag(s) for s in argv[i].split(",") if normalize_test_tag(s))
+        elif a.startswith("--tag="):
+            tags.extend(normalize_test_tag(s) for s in a[6:].split(",") if normalize_test_tag(s))
+        elif a.startswith("-t="):
+            tags.extend(normalize_test_tag(s) for s in a[3:].split(",") if normalize_test_tag(s))
+        elif a in ("--skip-tag", "--skip-tags", "--exclude-tag", "--exclude-tags"):
+            if i + 1 < len(argv):
+                i += 1
+                exclude_tags.extend(
+                    normalize_test_tag(s) for s in argv[i].split(",") if normalize_test_tag(s)
+                )
+        elif (
+            a.startswith("--skip-tag=")
+            or a.startswith("--skip-tags=")
+            or a.startswith("--exclude-tag=")
+            or a.startswith("--exclude-tags=")
+        ):
+            eq = a.index("=")
+            exclude_tags.extend(
+                normalize_test_tag(s) for s in a[eq + 1 :].split(",") if normalize_test_tag(s)
+            )
+        elif not a.startswith("-") and _looks_like_pattern(a) and pattern is None:
+            pattern = a
+        i += 1
+    return tags, exclude_tags, pattern
+
+
+def _first_pattern_arg(argv: List[str]) -> Optional[str]:
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a in (FLAG_TAG, FLAG_TAGS, FLAG_T):
+            if i + 1 < len(argv):
+                i += 1
+            i += 1
+            continue
+        if a.startswith("--tag=") or a.startswith("-t="):
+            i += 1
+            continue
+        if a in ("--skip-tag", "--skip-tags", "--exclude-tag", "--exclude-tags"):
+            if i + 1 < len(argv):
+                i += 1
+            i += 1
+            continue
+        if (
+            a.startswith("--skip-tag=")
+            or a.startswith("--skip-tags=")
+            or a.startswith("--exclude-tag=")
+            or a.startswith("--exclude-tags=")
+        ):
+            i += 1
+            continue
+        if a.startswith("-") and a != "-":
+            i += 1
+            continue
+        if _looks_like_pattern(a):
+            return a
+        i += 1
+    return None
+
+
+def _parse_browser_name(argv: List[str]) -> Optional[str]:
+    if "--browser" not in argv:
+        return None
+    idx = argv.index("--browser")
+    if idx + 1 < len(argv):
+        b = argv[idx + 1].lower()
+        if b in ("chrome", "edge", "opera", "firefox"):
+            return b
+    return None
+
+
+def _pause_on_failure(argv: List[str]) -> bool:
+    return "--pause-on-failure" in argv or "--debug" in argv
 
 
 def _is_test_file(name: str) -> bool:
@@ -102,13 +204,22 @@ def resolve_config_path(config_path: str) -> Optional[str]:
     return None
 
 
-def run_config(config_path: str, headless: bool = True) -> None:
+def run_config(
+    config_path: str,
+    headless: bool = True,
+    *,
+    browser: Optional[str] = None,
+    pause_on_failure: bool = False,
+) -> None:
     resolved = resolve_config_path(config_path)
     if not resolved:
         print(f"Config file not found: {config_path}")
         sys.exit(1)
     print(f"Running config: {config_path}\n")
-    result = run_config_file(resolved, {"headless": headless})
+    opts = {"headless": headless, "pause_on_failure": pause_on_failure}
+    if browser:
+        opts["browser"] = browser
+    result = run_config_file(resolved, opts)
     if result.errors:
         print("\nFailed test(s):")
         for e in result.errors:
@@ -130,40 +241,65 @@ def main() -> None:
         init()
         return
 
+    browser_opt = _parse_browser_name(argv)
+    pause_dbg = _pause_on_failure(argv)
+
     if "run" in argv:
         idx = argv.index("run")
         config_path = argv[idx + 1] if idx + 1 < len(argv) else None
-        if not config_path:
-            print("Usage: python -m cstesting run <config.conf> [--headed]")
+        if not config_path or config_path.startswith("-"):
+            print(
+                "Usage: python -m cstesting run <config.conf> "
+                "[--headed] [--browser chrome|edge|opera|firefox] [--pause-on-failure|--debug]"
+            )
             sys.exit(1)
         headed = "--headed" in argv
-        run_config(config_path, headless=not headed)
+        run_config(
+            config_path,
+            headless=not headed,
+            browser=browser_opt,
+            pause_on_failure=pause_dbg,
+        )
         return
 
-    # Direct config: python -m cstesting login.conf
-    arg = None
+    tags, exclude_tags, tag_pattern = _parse_tag_args(argv)
+
+    # Direct config: any argument ending in .conf / .config (e.g. after --tag smoke login.conf)
+    direct_conf: Optional[str] = None
     for a in argv:
         if a.startswith("-"):
             continue
-        if a.endswith(".conf") or a.endswith(".config"):
-            if resolve_config_path(a):
-                arg = a
-                break
-        arg = a
-        break
+        if a.endswith((".conf", ".config")) and resolve_config_path(a):
+            direct_conf = a
+            break
 
-    if arg and (arg.endswith(".conf") or arg.endswith(".config")):
-        if resolve_config_path(arg):
-            run_config(arg, headless="--headed" not in argv)
-            return
+    if direct_conf:
+        run_config(
+            direct_conf,
+            headless="--headed" not in argv,
+            browser=browser_opt,
+            pause_on_failure=pause_dbg,
+        )
+        return
 
-    pattern = arg or "**/*.test.py"
+    pattern = tag_pattern or _first_pattern_arg(argv) or "**/*.test.py"
     test_files = find_test_files(pattern, cwd)
     if not test_files:
         print("No test files found. Create files matching *.test.py or *.spec.py — or run: python -m cstesting path/to/test.py")
         sys.exit(0)
 
+    if tags:
+        print(f"Running tests with any tag: {', '.join(tags)}\n")
+    if exclude_tags:
+        print(f"Skipping tests with any tag: {', '.join(exclude_tags)}\n")
+
     total_result = RunResult()
+    run_opts = {"pause_on_failure": pause_dbg}
+    if tags:
+        run_opts["tags"] = tags
+    if exclude_tags:
+        run_opts["exclude_tags"] = exclude_tags
+
     for file_path in test_files:
         reset_runner()
         try:
@@ -172,7 +308,7 @@ def main() -> None:
             print(f"Failed to load {file_path}:", err)
             sys.exit(1)
         rel = Path(file_path).relative_to(cwd)
-        result = run({"file": str(rel)})
+        result = run({**run_opts, "file": str(rel)})
         total_result.passed += result.passed
         total_result.failed += result.failed
         total_result.skipped += result.skipped

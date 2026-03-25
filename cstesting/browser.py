@@ -355,25 +355,48 @@ class FrameHandle:
 
 
 
+def _resolve_playwright_engine(browser: str) -> tuple:
+    """Map CLI names (chrome, edge, …) to Playwright engine and launch keyword args."""
+    b = (browser or "chrome").lower().strip()
+    if b in ("chrome", "chromium"):
+        return "chromium", {}
+    if b == "edge":
+        return "chromium", {"channel": "msedge"}
+    if b == "opera":
+        # Playwright may not ship Opera; use Chromium with default channel as best effort
+        return "chromium", {}
+    if b == "firefox":
+        return "firefox", {}
+    if b == "webkit":
+        return "webkit", {}
+    return "chromium", {}
+
+
 async def create_browser(
     headless: bool = True,
     browser: str = "chromium",
     port: Optional[int] = None,
     **kwargs: Any,
 ) -> BrowserApi:
-    """Launch browser and return BrowserApi. Options: headless, browser='chromium'|'firefox'|'webkit', port (connect)."""
+    """Launch browser and return BrowserApi.
+
+    ``browser`` accepts Playwright names (chromium, firefox, webkit) or CLI-style
+    chrome, edge, opera, firefox (aligned with CSTesting Node).
+    """
     if not _PLAYWRIGHT_AVAILABLE:
         raise RuntimeError(
             "Playwright is required for browser automation. Install with: pip install playwright && playwright install"
         )
     pw = await async_playwright().start()
-    browser_type = getattr(pw, browser if browser != "chrome" else "chromium", pw.chromium)
+    engine, launch_extra = _resolve_playwright_engine(browser)
+    launch_kw = {**launch_extra, **kwargs}
+    browser_type = getattr(pw, engine, pw.chromium)
     if port:
         browser_instance = await browser_type.connect_over_cdp(f"http://127.0.0.1:{port}")
         context = browser_instance.contexts[0] if browser_instance.contexts else await browser_instance.new_context()
         page = context.pages[0] if context.pages else await context.new_page()
     else:
-        browser_instance = await browser_type.launch(headless=headless, **kwargs)
+        browser_instance = await browser_type.launch(headless=headless, **launch_kw)
         context = await browser_instance.new_context()
         page = await context.new_page()
 

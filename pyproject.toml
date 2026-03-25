@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cstesting"
-version = "0.1.0"
+version = "0.1.1"
 description = "Python testing framework — test runner, assertions, API testing, browser automation (EasyTesting/CSTesting port)"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -33,8 +33,8 @@ cstesting = "cstesting.cli:main"
 cst = "cstesting.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/lokesh771988/EasyTesting"
-Repository = "https://github.com/lokesh771988/EasyTesting"
+Homepage = "https://cstesting.github.io/cstesting/"
+Repository = "https://github.com/cstesttool/CSTesting-Python.git"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -36,7 +36,10 @@ Thumbs.db
 htmlcov/
 .tox/
 .nox/
-
+docs/
 # Logs and local config (uncomment if you keep secrets in config)
 # *.log
 # *.conf
+
+# Local PyPI publish script (may contain API token)
+publish.ps1

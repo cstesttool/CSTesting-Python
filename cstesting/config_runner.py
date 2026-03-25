@@ -2,6 +2,7 @@
 Run a config file: parse steps, execute in browser, return RunResult for report.
 """
 import asyncio
+import sys
 import time
 from typing import Optional, Dict, Any
 
@@ -34,6 +35,11 @@ def _step_label(step: ConfigStep) -> str:
     if step.action == "verifyText":
         return f"assertText {step.selector or 'page'} contains \"{step.expected}\""
     return str(step.action)
+
+
+async def _wait_for_enter(msg: str) -> None:
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, lambda: input(msg))
 
 
 class _RunContext:
@@ -130,6 +136,8 @@ async def _run_config_async(
     parsed = parse_config_file(config_path)
     opts = options or {}
     headless = opts.get("headless", parsed.headless)
+    browser_name = opts.get("browser") or "chrome"
+    pause_on_failure = bool(opts.get("pause_on_failure") or opts.get("pauseOnFailure"))
     result = RunResult()
     result.total = len(parsed.test_cases)
     start = time.time()
@@ -140,7 +148,10 @@ async def _run_config_async(
             step_labels = []
             case_start = time.time()
             if not ctx.browser:
-                ctx.browser = await create_browser(headless=headless)
+                print(
+                    f"  Launching {browser_name} ({'headless' if headless else 'visible window'})..."
+                )
+                ctx.browser = await create_browser(headless=headless, browser=browser_name)
             failed = False
             last_error = None
             failed_step_index = None
@@ -172,6 +183,16 @@ async def _run_config_async(
                         "file": parsed.name,
                     }
                 )
+                if pause_on_failure:
+                    if sys.stdin.isatty():
+                        await _wait_for_enter(
+                            "  Browser left open for debugging. Inspect the page, fix your .conf, then press Enter to close the browser.\n"
+                        )
+                    else:
+                        print(
+                            "  (--pause-on-failure ignored: stdin is not a TTY; browser will close so CI does not hang.)"
+                        )
+                    break
             else:
                 result.passed += 1
                 result.passed_tests.append(
@@ -195,7 +216,10 @@ def run_config_file(
     config_path: str,
     options: Optional[Dict[str, Any]] = None,
 ) -> RunResult:
-    """Run a config file and return RunResult. options: headless=bool."""
+    """Run a config file and return RunResult.
+
+    options: ``headless``, ``browser`` (chrome|edge|opera|firefox), ``pause_on_failure`` / ``pauseOnFailure``.
+    """
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:

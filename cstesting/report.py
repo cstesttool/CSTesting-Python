@@ -78,7 +78,11 @@ def _build_test_row_html(row: Dict, index: int) -> str:
         error_block = f'<div class="report-section report-error-section"><div class="report-section-title">Error</div><div class="report-error-content"><pre class="report-error-message">{err_msg}</pre><pre class="report-error-stack">{err_stack}</pre><button type="button" class="report-copy-btn" data-copy="error">Copy</button></div></div>'
 
     tags = row.get("tags") or []
-    tags_html = f'<div class="report-tags-row">{"".join(f"<span class="report-tag">{_escape(t)}</span>" for t in tags)}</div>' if tags else ""
+    tags_html = (
+        '<div class="report-tags-row">'
+        + "".join(f'<span class="report-tag">{_escape(t)}</span>' for t in tags)
+        + "</div>"
+    ) if tags else ""
     file_line = f'<div class="report-source">{_escape(row.get("file", ""))}</div>' if row.get("file") else ""
 
     return f'''
